@@ -2,198 +2,197 @@
 const express = require('express');
 const router = express.Router();
 
-const Event = require('../models/Event');
+const EventModel = require('../models/Event');
 const {
-    createClock,
-    incrementClock,
-    mergeClocksOnReceive,
-    compareVectors,
+    initializeVectorClock,
+    advanceVectorClock,
+    synchronizeVectorClocks,
+    compareClockVectors,
 } = require('../core/vectorClock');
-const { createHLC, tickHLC, receiveHLC } = require('../core/hlc');
-const { detectConflict, resolveConflict } = require('../core/conflict');
+const { initializeHybridClock, advanceHybridClock, synchronizeHybridClocks } = require('../core/hlc');
+const { identifyConcurrency, handleConcurrency } = require('../core/conflict');
 
-// ── In-memory node state ───────────────────────────────
-const NUM_NODES = parseInt(process.env.NUM_NODES, 10) || 3;
+// In-memory storage for node states
+const TOTAL_NODES = parseInt(process.env.NUM_NODES, 10) || 3;
 
-const nodeClocks = {};   // nodeId → vector clock array
-const nodeHLCs = {};     // nodeId → HLC object
+const vectorClocks = {}; // Maps nodeId to its vector clock
+const hybridClocks = {}; // Maps nodeId to its hybrid logical clock
 
-function ensureNode(nodeId) {
-    if (!nodeClocks[nodeId]) {
-        nodeClocks[nodeId] = createClock(NUM_NODES);
-        nodeHLCs[nodeId] = createHLC(nodeId);
+function initializeNodeState(nodeId) {
+    if (!vectorClocks[nodeId]) {
+        vectorClocks[nodeId] = initializeVectorClock(TOTAL_NODES);
+        hybridClocks[nodeId] = initializeHybridClock(nodeId);
     }
 }
 
-// ── POST /event/internal ──────────────────────────────
+// Endpoint for internal events
 router.post('/event/internal', async (req, res) => {
     try {
         const { nodeId, payload } = req.body;
 
-        if (nodeId == null || nodeId < 0 || nodeId >= NUM_NODES) {
-            return res.status(400).json({ error: `nodeId must be 0..${NUM_NODES - 1}` });
+        if (nodeId == null || nodeId < 0 || nodeId >= TOTAL_NODES) {
+            return res.status(400).json({ error: `nodeId must be between 0 and ${TOTAL_NODES - 1}` });
         }
 
-        ensureNode(nodeId);
+        initializeNodeState(nodeId);
 
-        // Update clocks
-        nodeClocks[nodeId] = incrementClock(nodeClocks[nodeId], nodeId);
-        nodeHLCs[nodeId] = tickHLC(nodeHLCs[nodeId]);
+        // Advance the clocks for this node
+        vectorClocks[nodeId] = advanceVectorClock(vectorClocks[nodeId], nodeId);
+        hybridClocks[nodeId] = advanceHybridClock(hybridClocks[nodeId]);
 
-        const event = await Event.create({
+        const newEvent = await EventModel.create({
             nodeId,
             eventType: 'internal',
-            payload: payload || `Internal event on Node ${nodeId}`,
-            vectorClock: nodeClocks[nodeId],
-            hybridLogicalClock: nodeHLCs[nodeId],
+            payload: payload || `Internal event at Node ${nodeId}`,
+            vectorClock: vectorClocks[nodeId],
+            hybridLogicalClock: hybridClocks[nodeId],
         });
 
-        res.status(201).json(event);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(201).json(newEvent);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
     }
 });
 
-// ── POST /event/send ──────────────────────────────────
+// Endpoint for sending events
 router.post('/event/send', async (req, res) => {
     try {
         const { nodeId, targetNodeId, payload } = req.body;
 
-        if (nodeId == null || nodeId < 0 || nodeId >= NUM_NODES) {
-            return res.status(400).json({ error: `nodeId must be 0..${NUM_NODES - 1}` });
+        if (nodeId == null || nodeId < 0 || nodeId >= TOTAL_NODES) {
+            return res.status(400).json({ error: `nodeId must be between 0 and ${TOTAL_NODES - 1}` });
         }
-        if (targetNodeId == null || targetNodeId < 0 || targetNodeId >= NUM_NODES) {
-            return res.status(400).json({ error: `targetNodeId must be 0..${NUM_NODES - 1}` });
+        if (targetNodeId == null || targetNodeId < 0 || targetNodeId >= TOTAL_NODES) {
+            return res.status(400).json({ error: `targetNodeId must be between 0 and ${TOTAL_NODES - 1}` });
         }
 
-        ensureNode(nodeId);
+        initializeNodeState(nodeId);
 
-        // Increment sender's clock
-        nodeClocks[nodeId] = incrementClock(nodeClocks[nodeId], nodeId);
-        nodeHLCs[nodeId] = tickHLC(nodeHLCs[nodeId]);
+        // Advance the sender's clocks
+        vectorClocks[nodeId] = advanceVectorClock(vectorClocks[nodeId], nodeId);
+        hybridClocks[nodeId] = advanceHybridClock(hybridClocks[nodeId]);
 
-        const event = await Event.create({
+        const newEvent = await EventModel.create({
             nodeId,
             eventType: 'send',
-            payload: payload || `Node ${nodeId} → Node ${targetNodeId}`,
-            vectorClock: nodeClocks[nodeId],
-            hybridLogicalClock: nodeHLCs[nodeId],
+            payload: payload || `Message from Node ${nodeId} to Node ${targetNodeId}`,
+            vectorClock: vectorClocks[nodeId],
+            hybridLogicalClock: hybridClocks[nodeId],
         });
 
-        res.status(201).json(event);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(201).json(newEvent);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
     }
 });
 
-// ── POST /event/receive ───────────────────────────────
+// Endpoint for receiving events
 router.post('/event/receive', async (req, res) => {
     try {
         const { nodeId, sendEventId, payload } = req.body;
 
-        if (nodeId == null || nodeId < 0 || nodeId >= NUM_NODES) {
-            return res.status(400).json({ error: `nodeId must be 0..${NUM_NODES - 1}` });
+        if (nodeId == null || nodeId < 0 || nodeId >= TOTAL_NODES) {
+            return res.status(400).json({ error: `nodeId must be between 0 and ${TOTAL_NODES - 1}` });
         }
 
-        // Fetch the original send event to get its vector clock & HLC
-        const sendEvent = await Event.findById(sendEventId);
-        if (!sendEvent || sendEvent.eventType !== 'send') {
-            return res.status(400).json({ error: 'Invalid sendEventId – must reference a send event' });
+        // Retrieve the sending event for clock synchronization
+        const sendingEvent = await EventModel.findById(sendEventId);
+        if (!sendingEvent || sendingEvent.eventType !== 'send') {
+            return res.status(400).json({ error: 'sendEventId must point to a valid send event' });
         }
 
-        ensureNode(nodeId);
+        initializeNodeState(nodeId);
 
-        // Merge vector clocks
-        nodeClocks[nodeId] = mergeClocksOnReceive(
-            nodeClocks[nodeId],
-            sendEvent.vectorClock,
+        // Synchronize vector clocks
+        vectorClocks[nodeId] = synchronizeVectorClocks(
+            vectorClocks[nodeId],
+            sendingEvent.vectorClock,
             nodeId
         );
 
-        // Merge HLCs
-        const { hlc } = receiveHLC(nodeHLCs[nodeId], sendEvent.hybridLogicalClock);
-        nodeHLCs[nodeId] = hlc;
+        // Synchronize hybrid clocks
+        const { hlc: updatedHLC } = synchronizeHybridClocks(hybridClocks[nodeId], sendingEvent.hybridLogicalClock);
+        hybridClocks[nodeId] = updatedHLC;
 
-        const event = await Event.create({
+        const newEvent = await EventModel.create({
             nodeId,
             eventType: 'receive',
-            payload: payload || `Node ${nodeId} received from Node ${sendEvent.nodeId}`,
-            vectorClock: nodeClocks[nodeId],
-            hybridLogicalClock: nodeHLCs[nodeId],
-            linkedEventId: sendEvent._id,
+            payload: payload || `Node ${nodeId} received message from Node ${sendingEvent.nodeId}`,
+            vectorClock: vectorClocks[nodeId],
+            hybridLogicalClock: hybridClocks[nodeId],
+            linkedEventId: sendingEvent._id,
         });
 
-        res.status(201).json(event);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
+        res.status(201).json(newEvent);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
     }
 });
 
-// ── GET /events ───────────────────────────────────────
+// Retrieve all events
 router.get('/events', async (_req, res) => {
     try {
-        const events = await Event.find().sort({ createdAt: 1 });
-        res.json(events);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
+        const allEvents = await EventModel.find().sort({ createdAt: 1 });
+        res.json(allEvents);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
     }
 });
 
-// ── GET /events/compare/:id1/:id2 ────────────────────
+// Compare two events
 router.get('/events/compare/:id1/:id2', async (req, res) => {
     try {
-        const [e1, e2] = await Promise.all([
-            Event.findById(req.params.id1),
-            Event.findById(req.params.id2),
+        const [firstEvent, secondEvent] = await Promise.all([
+            EventModel.findById(req.params.id1),
+            EventModel.findById(req.params.id2),
         ]);
 
-        if (!e1 || !e2) {
-            return res.status(404).json({ error: 'One or both events not found' });
+        if (!firstEvent || !secondEvent) {
+            return res.status(404).json({ error: 'One or both events could not be found' });
         }
 
-        const relation = compareVectors(e1.vectorClock, e2.vectorClock);
-        const isConcurrent = detectConflict(e1.vectorClock, e2.vectorClock);
+        const clockComparison = compareClockVectors(firstEvent.vectorClock, secondEvent.vectorClock);
+        const hasConcurrency = identifyConcurrency(firstEvent.vectorClock, secondEvent.vectorClock);
 
-        let resolution = null;
-        if (isConcurrent) {
-            resolution = resolveConflict(e1, e2);
-            resolution = {
-                winnerId: resolution.winner._id,
-                loserId: resolution.loser._id,
-                strategy: resolution.strategy,
+        let conflictResolution = null;
+        if (hasConcurrency) {
+            conflictResolution = handleConcurrency(firstEvent, secondEvent);
+            conflictResolution = {
+                winnerId: conflictResolution.winner._id,
+                loserId: conflictResolution.loser._id,
+                strategy: conflictResolution.strategy,
             };
 
-            // Mark both events as conflicted in DB
-            await Event.updateMany(
-                { _id: { $in: [e1._id, e2._id] } },
+            // Update conflict status in database
+            await EventModel.updateMany(
+                { _id: { $in: [firstEvent._id, secondEvent._id] } },
                 { conflictStatus: true, resolvedBy: 'Last-Write-Wins (HLC)' }
             );
         }
 
         res.json({
-            event1: { id: e1._id, nodeId: e1.nodeId, vectorClock: e1.vectorClock },
-            event2: { id: e2._id, nodeId: e2.nodeId, vectorClock: e2.vectorClock },
-            relation,
-            isConcurrent,
-            resolution,
+            event1: { id: firstEvent._id, nodeId: firstEvent.nodeId, vectorClock: firstEvent.vectorClock },
+            event2: { id: secondEvent._id, nodeId: secondEvent.nodeId, vectorClock: secondEvent.vectorClock },
+            relation: clockComparison,
+            isConcurrent: hasConcurrency,
+            resolution: conflictResolution,
         });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
     }
 });
 
-// ── DELETE /events (utility – reset) ──────────────────
+// Clear all events and reset states
 router.delete('/events', async (_req, res) => {
     try {
-        await Event.deleteMany({});
-        // Reset in-memory state
-        Object.keys(nodeClocks).forEach((k) => delete nodeClocks[k]);
-        Object.keys(nodeHLCs).forEach((k) => delete nodeHLCs[k]);
-        res.json({ message: 'All events cleared and node states reset' });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
+        await EventModel.deleteMany({});
+        // Clear in-memory states
+        Object.keys(vectorClocks).forEach(key => delete vectorClocks[key]);
+        Object.keys(hybridClocks).forEach(key => delete hybridClocks[key]);
+        res.json({ message: 'All events removed and node states reset' });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
     }
 });
 
 module.exports = router;
-//routes
