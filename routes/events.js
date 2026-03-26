@@ -1,8 +1,3 @@
-// ═══════════════════════════════════════════════════════════════
-//  REST API – Event Routes
-//  Manages in-memory vector clocks & HLCs per node, persists
-//  events to MongoDB, and exposes comparison endpoints.
-// ═══════════════════════════════════════════════════════════════
 
 const express = require('express');
 const router = express.Router();
