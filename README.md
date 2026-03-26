@@ -2,6 +2,8 @@
 
 A distributed system simulation built with **Node.js, Express.js, and MongoDB** that demonstrates **Vector Clocks**, **Hybrid Logical Clocks (HLC)**, and **conflict detection** across multiple logical nodes.
 
+- **Vector Clocks** to maintain event ordering
+- **Hybrid Logical Clocks (HLC)** for consistent time tracking
 ---
 
 ## 📁 Folder Structure
