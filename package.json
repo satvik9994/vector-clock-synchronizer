@@ -1,0 +1,30 @@
+{
+  "name": "vector-clock-synchronizer",
+  "version": "1.0.0",
+  "description": "Distributed system simulation with Vector Clocks, Hybrid Logical Clocks, and conflict detection",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "simulate": "node simulation/simulate.js"
+  },
+  "keywords": [
+    "vector-clock",
+    "distributed-systems",
+    "hlc",
+    "conflict-detection"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "mongodb-memory-server": "^11.0.1",
+    "mongoose": "^8.7.0",
+    "morgan": "^1.10.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.4"
+  }
+}
