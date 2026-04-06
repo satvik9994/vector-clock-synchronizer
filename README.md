@@ -6,7 +6,7 @@ A distributed system simulation built with **Node.js, Express.js, and MongoDB** 
 - **Hybrid Logical Clocks (HLC)** for consistent time tracking
 ---
 
-## 📁 Folder Structure
+## 📁 Folder Structure  
 
 ```
 vector-clock-synchronizer/
