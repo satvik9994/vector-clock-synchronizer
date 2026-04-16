@@ -73,4 +73,8 @@ module.exports = {
     incrementClock,
     mergeClocksOnReceive,
     compareVectors,
+    initializeVectorClock: createClock,
+    advanceVectorClock: incrementClock,
+    synchronizeVectorClocks: mergeClocksOnReceive,
+    compareClockVectors: compareVectors,
 };

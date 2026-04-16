@@ -37,4 +37,6 @@ function resolveConflict(event1, event2) {
 module.exports = {
     detectConflict,
     resolveConflict,
+    identifyConcurrency: detectConflict,
+    handleConcurrency: resolveConflict,
 };

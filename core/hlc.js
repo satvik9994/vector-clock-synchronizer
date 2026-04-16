@@ -117,4 +117,7 @@ module.exports = {
     receiveHLC,
     compareHLC,
     MAX_DRIFT_MS,
+    initializeHybridClock: createHLC,
+    advanceHybridClock: tickHLC,
+    synchronizeHybridClocks: receiveHLC,
 };
