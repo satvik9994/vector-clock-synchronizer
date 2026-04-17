@@ -201,6 +201,7 @@ async function main() {
     console.log(`  ${COLORS.green}Causal relations found   : ${causalCount}${COLORS.reset}`);
     console.log(`  ${COLORS.red}Concurrent (conflicts)   : ${concurrentCount}${COLORS.reset}`);
     console.log(`\n  ${COLORS.dim}View full timeline at: ${BASE_URL}${COLORS.reset}\n`);
+    console.log(`${COLORS.cyan}Insight: Vector clocks help determine causal relationships and detect concurrent conflicts in distributed systems.${COLORS.reset}`);
 }
 
 main().catch((err) => {
