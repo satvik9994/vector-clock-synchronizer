@@ -31,10 +31,10 @@ const startServer = async () => {
     try {
         await connectDB();
     } catch (err) {
-        console.warn(`⚠️  MongoDB not available – server will start without DB. Error: ${err.message}`);
+        console.warn(` MongoDB not available – server will start without DB. Error: ${err.message}`);
     }
     app.listen(PORT, () => {
-        console.log(`\n🚀 Vector Clock Synchronizer running on http://localhost:${PORT}`);
+        console.log(`\n Vector Clock Synchronizer running on http://localhost:${PORT}`);
         console.log(`   Nodes configured: ${process.env.NUM_NODES || 3}\n`);
     });
 };
@@ -54,34 +54,48 @@ const eventRoutes = require('./routes/events');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+
+
 // ── Middleware ──────────────────────────────────────────
 app.use(cors());
 app.use(express.json());
 app.use(morgan('dev'));
 
+
+
 // ── Static Files ───────────────────────────────────────
 app.use(express.static(path.join(__dirname, 'public')));
 
+
+
 // ── API Routes ─────────────────────────────────────────
 app.use('/', eventRoutes);
+
+
 
 // ── Root redirect ──────────────────────────────────────
 app.get('/', (_req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+
+
+
 // ── Start ──────────────────────────────────────────────
 const startServer = async () => {
     try {
         await connectDB();
     } catch (err) {
-        console.warn(`⚠️  MongoDB not available – server will start without DB. Error: ${err.message}`);
+        console.warn(` MongoDB not available – server will start without DB. Error: ${err.message}`);
     }
+
+
     app.listen(PORT, () => {
-        console.log(`\n🚀 Vector Clock Synchronizer running on http://localhost:${PORT}`);
+        console.log(`\nVector Clock Synchronizer running on http://localhost:${PORT}`);
         // console.log(`   Nodes configured: ${process.env.NUM_NODES || 3}\n`);
     });
 };
+
 
 startServer();
 
