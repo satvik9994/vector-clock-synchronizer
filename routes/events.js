@@ -1,4 +1,3 @@
-
 const express = require('express');
 const router = express.Router();
 
@@ -18,12 +17,29 @@ const TOTAL_NODES = parseInt(process.env.NUM_NODES, 10) || 3;
 const vectorClocks = {}; // Maps nodeId to its vector clock
 const hybridClocks = {}; // Maps nodeId to its hybrid logical clock
 
+// Request logger for route tracing
+router.use((req, _res, next) => {
+    console.log(`[API] ${req.method} ${req.originalUrl}`);
+    next();
+});
+
 function initializeNodeState(nodeId) {
     if (!vectorClocks[nodeId]) {
         vectorClocks[nodeId] = initializeVectorClock(TOTAL_NODES);
         hybridClocks[nodeId] = initializeHybridClock(nodeId);
+        console.log(`[INIT] Node ${nodeId} state initialized`);
     }
 }
+
+// Optional health/info route
+router.get('/health', (_req, res) => {
+    res.json({
+        status: 'ok',
+        totalNodes: TOTAL_NODES,
+        activeNodes: Object.keys(vectorClocks).length,
+        message: 'Vector Clock Synchronizer API is running',
+    });
+});
 
 // Endpoint for internal events
 router.post('/event/internal', async (req, res) => {
@@ -48,8 +64,12 @@ router.post('/event/internal', async (req, res) => {
             hybridLogicalClock: hybridClocks[nodeId],
         });
 
+        console.log(`[EVENT] Internal event created at Node ${nodeId}`);
+        console.log(`[CLOCK] Node ${nodeId} VC = [${vectorClocks[nodeId].join(', ')}]`);
+
         res.status(201).json(newEvent);
     } catch (error) {
+        console.error(`[ERROR] Internal event failed: ${error.message}`);
         res.status(500).json({ error: error.message });
     }
 });
@@ -80,8 +100,12 @@ router.post('/event/send', async (req, res) => {
             hybridLogicalClock: hybridClocks[nodeId],
         });
 
+        console.log(`[EVENT] Message sent from Node ${nodeId} to Node ${targetNodeId}`);
+        console.log(`[CLOCK] Sender Node ${nodeId} VC = [${vectorClocks[nodeId].join(', ')}]`);
+
         res.status(201).json(newEvent);
     } catch (error) {
+        console.error(`[ERROR] Send event failed: ${error.message}`);
         res.status(500).json({ error: error.message });
     }
 });
@@ -123,8 +147,12 @@ router.post('/event/receive', async (req, res) => {
             linkedEventId: sendingEvent._id,
         });
 
+        console.log(`[EVENT] Node ${nodeId} received message from Node ${sendingEvent.nodeId}`);
+        console.log(`[CLOCK] Receiver Node ${nodeId} VC = [${vectorClocks[nodeId].join(', ')}]`);
+
         res.status(201).json(newEvent);
     } catch (error) {
+        console.error(`[ERROR] Receive event failed: ${error.message}`);
         res.status(500).json({ error: error.message });
     }
 });
@@ -133,8 +161,10 @@ router.post('/event/receive', async (req, res) => {
 router.get('/events', async (_req, res) => {
     try {
         const allEvents = await EventModel.find().sort({ createdAt: 1 });
+        console.log(`[FETCH] Retrieved ${allEvents.length} event(s)`);
         res.json(allEvents);
     } catch (error) {
+        console.error(`[ERROR] Fetch events failed: ${error.message}`);
         res.status(500).json({ error: error.message });
     }
 });
@@ -154,6 +184,11 @@ router.get('/events/compare/:id1/:id2', async (req, res) => {
         const clockComparison = compareClockVectors(firstEvent.vectorClock, secondEvent.vectorClock);
         const hasConcurrency = identifyConcurrency(firstEvent.vectorClock, secondEvent.vectorClock);
 
+        console.log(
+            `[COMPARE] Node ${firstEvent.nodeId} [${firstEvent.vectorClock.join(', ')}] vs ` +
+            `Node ${secondEvent.nodeId} [${secondEvent.vectorClock.join(', ')}] => ${clockComparison}`
+        );
+
         let conflictResolution = null;
         if (hasConcurrency) {
             conflictResolution = handleConcurrency(firstEvent, secondEvent);
@@ -162,6 +197,11 @@ router.get('/events/compare/:id1/:id2', async (req, res) => {
                 loserId: conflictResolution.loser._id,
                 strategy: conflictResolution.strategy,
             };
+
+            console.log(
+                `[CONFLICT] Detected between ${firstEvent._id} and ${secondEvent._id} | ` +
+                `Winner: ${conflictResolution.winnerId} | Strategy: ${conflictResolution.strategy}`
+            );
 
             // Update conflict status in database
             await EventModel.updateMany(
@@ -178,6 +218,7 @@ router.get('/events/compare/:id1/:id2', async (req, res) => {
             resolution: conflictResolution,
         });
     } catch (error) {
+        console.error(`[ERROR] Compare events failed: ${error.message}`);
         res.status(500).json({ error: error.message });
     }
 });
@@ -186,11 +227,16 @@ router.get('/events/compare/:id1/:id2', async (req, res) => {
 router.delete('/events', async (_req, res) => {
     try {
         await EventModel.deleteMany({});
+
         // Clear in-memory states
-        Object.keys(vectorClocks).forEach(key => delete vectorClocks[key]);
-        Object.keys(hybridClocks).forEach(key => delete hybridClocks[key]);
+        Object.keys(vectorClocks).forEach((key) => delete vectorClocks[key]);
+        Object.keys(hybridClocks).forEach((key) => delete hybridClocks[key]);
+
+        console.log('[RESET] All events removed and node states reset');
+
         res.json({ message: 'All events removed and node states reset' });
     } catch (error) {
+        console.error(`[ERROR] Reset failed: ${error.message}`);
         res.status(500).json({ error: error.message });
     }
 });
